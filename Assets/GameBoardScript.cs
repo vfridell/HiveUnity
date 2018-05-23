@@ -12,6 +12,108 @@ public class GameBoardScript : MonoBehaviour
     private List<GameObject> futureMoveObjects = new List<GameObject>();
     public Board currentBoard { get; set; }
     public Piece selectedPiece { get; set; }
+    public Vector3 cameraDestination { get; set; }
+
+    void Update()
+    {
+        if (Input.GetMouseButton(0))
+        {
+            HandleInput();
+        }
+    }
+
+    private void FixedUpdate()
+    {
+        CenterCameraOnBoard();
+    }
+
+    void MoveCamera()
+    {
+        float distance = Vector3.Distance(Camera.main.transform.position, cameraDestination);
+        if (distance < 100f) return;
+        var diff = cameraDestination - Camera.main.transform.position;
+        float xSign = Math.Sign(diff.x);
+        float ySign = Math.Sign(diff.y);
+        float z = 0f;
+        Camera.main.transform.position += new Vector3(xSign * 5, ySign * 5, z);
+    }
+
+    private void CenterCameraOnBoard()
+    {
+        cameraDestination = GetCenterPoint();
+        MoveCamera();
+    }
+
+    private Vector3 GetCenterPoint()
+    {
+        int maxColumn = int.MinValue;
+        int minColumn = int.MaxValue;
+        int maxRow = int.MinValue;
+        int minRow = int.MaxValue;
+        foreach (Hex hex in currentBoard.playedPieces.Select(p => p.Value))
+        {
+            minColumn = Math.Min(hex.column, minColumn);
+            maxColumn = Math.Max(hex.column, maxColumn);
+            minRow = Math.Min(hex.row, minRow);
+            maxRow = Math.Max(hex.row, maxRow);
+        }
+
+        Hex minHex = new Hex(minColumn, minRow);
+        Hex maxHex = new Hex(maxColumn, maxRow);
+        int distance = Hex.Distance(maxHex, minHex);
+        Hex centerHex = new Hex(maxHex.column - (distance / 2), maxHex.row - (distance / 2));
+        return GameService.HexCoordToCenterPoint(centerHex, GameService._drawSize, Vector3.zero);
+    }
+
+    void HandleInput()
+    {
+        Ray inputRay = Camera.main.ScreenPointToRay(Input.mousePosition);
+        RaycastHit2D [] hits = Physics2D.RaycastAll(inputRay.origin, inputRay.direction);
+
+        GameObject target = hits.Select(h => h.collider.transform.gameObject)
+                      .FirstOrDefault(o => o.tag == "FutureMoveSpot");
+        if(target == null)
+        {
+            target = hits.Select(h => h.collider.transform.gameObject)
+                      .FirstOrDefault(o => o.tag == "GamePiece");
+        }
+
+        if (target != null)
+        {
+            if (target.tag == "FutureMoveSpot")
+            {
+                FutureMoveSpotScript futureSpotScript = target.GetComponent<FutureMoveSpotScript>();
+                MakeMove(futureSpotScript.Move);
+            }
+            else if (target.tag == "GamePiece" && selectedPiece == null)
+            {
+                Piece thisPiece = NotationParser.GetPieceByNotation(target.name);
+                if (currentBoard.ColorToPlay != thisPiece.color || !currentBoard.GetMoves().Any(m => m.pieceToMove.Equals(thisPiece))) return;
+                bool alreadyPlaced = !currentBoard.unplayedPieces.Contains(thisPiece);
+                List<Hex> hexes = null;
+
+                if (alreadyPlaced)
+                {
+                    hexes = currentBoard.AllMoves.Where(m => thisPiece.Equals(m.pieceToMove)).Select(m => m.hex).ToList();
+                }
+                else
+                {
+                    if (currentBoard.hivailableHexes.Count == 0) currentBoard.RefreshDependantBoardData();
+                    if (thisPiece.color == PieceColor.White)
+                        hexes = currentBoard.hivailableHexes.Where(kvp => kvp.Value.WhiteCanPlace).Select(kvp => kvp.Key).ToList();
+                    else
+                        hexes = currentBoard.hivailableHexes.Where(kvp => kvp.Value.BlackCanPlace).Select(kvp => kvp.Key).ToList();
+                }
+
+                ShowFutureMoves(thisPiece, hexes);
+            }
+        }
+        else
+        {
+            ClearFutureMoveObjects();
+        }
+
+    }
 
     public void ShowFutureMoves(Piece piece, List<Hex> hexes)
     {
@@ -41,6 +143,8 @@ public class GameBoardScript : MonoBehaviour
             Destroy(futureMoveObject);
         }
         futureMoveObjects.Clear();
+        UnhighlightSelectedPiece();
+        selectedPiece = null;
     }
 
     public void MakeMove(Move move)
@@ -122,6 +226,7 @@ public class GameBoardScript : MonoBehaviour
                                                             //_board.TryMakeMove(Move.GetMove(@"bB1 \bQ")); // 
 
         DrawBoard();
+        CenterCameraOnBoard();
     }
 
     private void DrawBoard()
@@ -147,6 +252,8 @@ public class GameBoardScript : MonoBehaviour
             }
         }
     }
+
+
 
     private static void SetPiecePosition(Piece piece, Vector3 vector3, int height = 0)
     {
