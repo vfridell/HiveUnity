@@ -20,17 +20,24 @@ public class GameBoardScript : MonoBehaviour
         {
             HandleInput();
         }
+        CenterCameraOnBoard();
+        MovePiecesInHand();
     }
 
-    private void FixedUpdate()
+    private void MovePiecesInHand()
     {
-        CenterCameraOnBoard();
+        Hex centerHex = GameService.GetCenterHex(currentBoard);
+        Dictionary<Hex, Piece> unplayedPiecesPosition = new Dictionary<Hex, Piece>();
+        foreach(Piece p in currentBoard.unplayedPieces)
+        {
+
+        }
     }
 
     void MoveCamera()
     {
         float distance = Vector3.Distance(Camera.main.transform.position, cameraDestination);
-        if (distance < 100f) return;
+        if (distance < 50f) return;
         var diff = cameraDestination - Camera.main.transform.position;
         float xSign = Math.Sign(diff.x);
         float ySign = Math.Sign(diff.y);
@@ -40,30 +47,12 @@ public class GameBoardScript : MonoBehaviour
 
     private void CenterCameraOnBoard()
     {
-        cameraDestination = GetCenterPoint();
+        Hex centerHex = GameService.GetCenterHex(currentBoard);
+        cameraDestination = GameService.HexCoordToCenterPoint(centerHex, GameService._drawSize, Vector3.zero);
         MoveCamera();
     }
 
-    private Vector3 GetCenterPoint()
-    {
-        int maxColumn = int.MinValue;
-        int minColumn = int.MaxValue;
-        int maxRow = int.MinValue;
-        int minRow = int.MaxValue;
-        foreach (Hex hex in currentBoard.playedPieces.Select(p => p.Value))
-        {
-            minColumn = Math.Min(hex.column, minColumn);
-            maxColumn = Math.Max(hex.column, maxColumn);
-            minRow = Math.Min(hex.row, minRow);
-            maxRow = Math.Max(hex.row, maxRow);
-        }
 
-        Hex minHex = new Hex(minColumn, minRow);
-        Hex maxHex = new Hex(maxColumn, maxRow);
-        int distance = Hex.Distance(maxHex, minHex);
-        Hex centerHex = new Hex(maxHex.column - (distance / 2), maxHex.row - (distance / 2));
-        return GameService.HexCoordToCenterPoint(centerHex, GameService._drawSize, Vector3.zero);
-    }
 
     void HandleInput()
     {
@@ -362,6 +351,51 @@ public static class GameService
         return new Vector3(xy.m11 - offsetPoint.x, xy.m21 - offsetPoint.y);
     }
 
+    public static Hex GetCenterHex(Board board)
+    {
+        int maxColumn = int.MinValue;
+        int minColumn = int.MaxValue;
+        int maxRow = int.MinValue;
+        int minRow = int.MaxValue;
+        foreach (Hex hex in board.playedPieces.Select(p => p.Value))
+        {
+            minColumn = Math.Min(hex.column, minColumn);
+            maxColumn = Math.Max(hex.column, maxColumn);
+            minRow = Math.Min(hex.row, minRow);
+            maxRow = Math.Max(hex.row, maxRow);
+        }
+
+        Hex centerHex = new Hex(minColumn + ((maxColumn - minColumn) / 2), minRow + ((maxRow - minRow) / 2));
+        return centerHex;
+    }
+
+    public static Hex GetMinVisibleHex(Board board)
+    {
+        float yCameraMin = Camera.main.transform.position.y - Camera.main.orthographicSize;
+        float xCameraMin = Camera.main.transform.position.x - (Camera.main.orthographicSize * Screen.width / Screen.height);
+
+        Hex currentHex = GetCenterHex(board);
+        HexagonDrawing d;
+        do
+        {
+            currentHex = new Hex(currentHex.column - 1, currentHex.row);
+            d = GetHexagonDrawing(currentHex, _drawSize, Vector3.zero);
+        }
+        while (d.center.x > xCameraMin);
+        int minColumn = currentHex.column + 3;
+
+        currentHex = GetCenterHex(board);
+        do
+        {
+            currentHex = new Hex(currentHex.column, currentHex.row - 1);
+            d = GetHexagonDrawing(currentHex, _drawSize, Vector3.zero);
+        }
+        while (d.center.y > yCameraMin);
+        int minRow = currentHex.row + 3;
+
+        return new Hex(minColumn, minRow);
+    }
+
     public static List<HexagonDrawing> GetHexagonsForBoard(Board board)
     {
         try
@@ -372,12 +406,46 @@ public static class GameService
                 HexagonDrawing hexWithImage = GetHexagonDrawing(kvp.Value, _drawSize, kvp.Key, _mainCanvasOffsetPoint);
                 results.Add(hexWithImage);
             }
-            HashSet<Tuple<PieceColor, string>> shown = new HashSet<Tuple<PieceColor, string>>();
-            foreach (Piece unplayedPiece in board.unplayedPieces.OrderBy(p => p.number))
+
+            Hex minVisibleHex = GetMinVisibleHex(board);
+
+            int minRow = minVisibleHex.row;
+            int minColumn = minVisibleHex.column;
+            int maxColumn = minColumn + 10;
+            int midCol = minColumn + 5;
+            int endCol = midCol + ((maxColumn - minColumn) / 2);
+
+
+            int currentCol = minVisibleHex.column;
+            int currentRow = minVisibleHex.row;
+            foreach (Piece unplayedPiece in board.unplayedPieces.Where(p => p.color == PieceColor.White))
             {
-                var pieceTypeTuple = new Tuple<PieceColor, string>(unplayedPiece.color, unplayedPiece.GetPieceNotation());
-                if (shown.Contains(pieceTypeTuple)) continue;
-                shown.Add(pieceTypeTuple);
+                Hex sideHex = new Hex(currentCol, currentRow);
+                HexagonDrawing hexWithImage = GetHexagonDrawing(sideHex, _drawSize, unplayedPiece, _mainCanvasOffsetPoint);
+                results.Add(hexWithImage);
+
+                currentCol++;
+                if (currentCol == midCol)
+                {
+                    currentCol = minColumn;
+                    currentRow -= 1;
+                }
+            }
+
+            currentCol = midCol + 1;
+            currentRow = minRow;
+            foreach (Piece unplayedPiece in board.unplayedPieces.Where(p => p.color == PieceColor.Black))
+            {
+                Hex sideHex = new Hex(currentCol, currentRow);
+                HexagonDrawing hexWithImage = GetHexagonDrawing(sideHex, _drawSize, unplayedPiece, _mainCanvasOffsetPoint);
+                results.Add(hexWithImage);
+
+                currentCol++;
+                if (currentCol == endCol)
+                {
+                    currentCol = midCol + 1;
+                    currentRow -= 1;
+                }
             }
 
             return results;
